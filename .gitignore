@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 .env
-runtime/
+/runtime/
 logs/
 node_modules/
 dist/
