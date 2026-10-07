@@ -12,3 +12,5 @@ matplotlib>=3.7
 scipy>=1.11
 bt>=1.2
 pandas-market-calendars>=4.3
+pydantic-settings>=2,<3
+tzlocal>=5,<6

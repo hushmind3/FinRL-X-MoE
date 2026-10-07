@@ -60,6 +60,14 @@ export type PaperState = {
   error?: string | null
 }
 
+export type PaperExecutionState = {
+  mode: string
+  available: boolean
+  account_type?: string
+  last_error?: string | null
+  last_result?: Record<string, unknown> | null
+}
+
 export type TargetWeights = {
   as_of: string
   signal_time?: string
@@ -80,6 +88,7 @@ export type AppState = {
   training: TrainingState
   inference: { running: boolean; error?: string | null }
   paper: PaperState
+  paper_execution: PaperExecutionState
   target_weights: TargetWeights | null
   last_decision: Record<string, unknown> | null
   error?: string | null

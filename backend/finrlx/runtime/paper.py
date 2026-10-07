@@ -69,6 +69,14 @@ class PaperAccount:
             self._save()
             return {"fills": created, "equity": self.equity(), "cash": self.cash}
 
+    def rebalance_strategy_result(self, result, timestamp: str) -> dict:
+        """Execute the official FinRL-X StrategyResult weight contract locally."""
+        rows = getattr(result, "weights", None)
+        if rows is None or not {"gvkey", "weight"}.issubset(rows.columns):
+            raise ValueError("FinRL StrategyResult에는 gvkey와 weight 열이 필요합니다.")
+        weights = {str(row.gvkey): float(row.weight) for row in rows.itertuples(index=False)}
+        return self.rebalance(weights, timestamp)
+
     def equity(self) -> float:
         return self.cash + sum(qty * self.prices.get(symbol, 0.0) for symbol, qty in self.positions.items())
 

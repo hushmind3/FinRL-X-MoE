@@ -14,7 +14,7 @@ function Test-Service([string]$url, [string]$expected) {
     if ($expected -eq 'api') {
       return $response.service -eq 'finrlx-backend' -and
         $response.project_id -eq 'finrlx-trading-lab' -and
-        $response.runtime_contract -eq 2
+        $response.runtime_contract -eq 5
     }
     $page = Invoke-WebRequest -Uri $url -TimeoutSec 2 -UseBasicParsing
     return $page.Content -match '<title>FinRL-X Trading Lab</title>'

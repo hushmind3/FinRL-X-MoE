@@ -29,10 +29,11 @@ class TargetWeightStrategy(BaseStrategy):
         clean = {str(k).upper(): float(v) for k, v in weights.items()}
         if any(not np.isfinite(v) or v < 0 for v in clean.values()) or sum(clean.values()) > 1 + 1e-8:
             raise ValueError("실제 종목 weight는 유한한 0 이상 값이며 합계는 1 이하여야 합니다.")
-        # Zero exposure is the absence of an order. Cash is the unallocated
-        # residual and never appears as a gvkey/ticker row.
+        # Cash is the unallocated residual and never appears as a ticker row.
+        # A zero-weight row closes an existing holding; with no holding it
+        # produces no order in the execution layer.
         self._weights = pd.DataFrame(
-            [{"gvkey": k, "weight": v} for k, v in clean.items() if v > 0],
+            [{"gvkey": k, "weight": v} for k, v in clean.items()],
             columns=["gvkey", "weight"],
         )
         self._metadata = {**(metadata or {}), "cash_weight": max(0.0, 1.0 - sum(clean.values()))}

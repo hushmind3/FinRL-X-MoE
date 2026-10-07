@@ -53,9 +53,11 @@ class MarketFeed:
         self.last_error = None
         self.running = True
         if provider == "alpaca":
-            if not os.getenv("ALPACA_API_KEY") or not os.getenv("ALPACA_API_SECRET"):
+            if not (os.getenv("APCA_API_KEY") or os.getenv("ALPACA_API_KEY")) or not (
+                os.getenv("APCA_API_SECRET") or os.getenv("ALPACA_API_SECRET")
+            ):
                 self.running = False
-                raise ValueError("Alpaca 실시간 시세를 쓰려면 .env에 ALPACA_API_KEY와 ALPACA_API_SECRET을 설정하세요.")
+                raise ValueError("Alpaca 실시간 시세를 쓰려면 .env에 FinRL-X 규격 APCA_API_KEY와 APCA_API_SECRET을 설정하세요.")
         if provider == "alpaca":
             self._task = asyncio.create_task(self._alpaca_loop(), name="finrlx-alpaca-stream")
         else:
@@ -192,7 +194,8 @@ class MarketFeed:
     async def _alpaca_loop(self) -> None:
         feed = os.getenv("ALPACA_DATA_FEED", "iex").lower()
         url = f"wss://stream.data.alpaca.markets/v2/{feed}"
-        key, secret = os.environ["ALPACA_API_KEY"], os.environ["ALPACA_API_SECRET"]
+        key = os.getenv("APCA_API_KEY") or os.environ["ALPACA_API_KEY"]
+        secret = os.getenv("APCA_API_SECRET") or os.environ["ALPACA_API_SECRET"]
         while self.running:
             try:
                 async with websockets.connect(url, ping_interval=20, ping_timeout=20, max_size=4_000_000) as ws:

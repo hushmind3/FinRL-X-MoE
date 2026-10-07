@@ -101,6 +101,7 @@ export function App() {
   const feed = state?.feed
   const champion = state?.champion
   const paper = state?.paper
+  const paperExecution = state?.paper_execution
 
   const perform = async (key: string, action: () => Promise<unknown>, success: string) => {
     setBusy(key); setNotice(''); setError('')
@@ -305,7 +306,8 @@ export function App() {
         <article className="panel xl:col-span-12">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <PanelTitle eyebrow="PAPER LEDGER" title="가상 계좌와 체결" icon={<Wallet size={16} className="text-emerald-200" />} trailing={null} />
-            <div className="flex items-center gap-2"><StatusPill tone={paper?.enabled && state?.inference?.running ? 'good' : 'idle'}>{paper?.enabled ? (state?.inference?.running ? 'PAPER ACTIVE' : 'INFERENCE STOPPED') : 'PAPER PAUSED'}</StatusPill><span className="text-[9px] text-slate-500">fee 0.10%</span></div>
+            <div className="flex flex-wrap items-center gap-2"><StatusPill tone={paper?.enabled && state?.inference?.running ? 'good' : 'idle'}>{paper?.enabled ? (state?.inference?.running ? 'PAPER ACTIVE' : 'INFERENCE STOPPED') : 'PAPER PAUSED'}</StatusPill><StatusPill tone={paperExecution?.mode === 'alpaca_paper' && paperExecution.available ? 'good' : 'idle'}>{paperExecution?.mode === 'alpaca_paper' ? (paperExecution.available ? 'FINRL ALPACA PAPER' : 'ALPACA PAPER UNAVAILABLE') : 'LOCAL PAPER'}</StatusPill><span className="text-[9px] text-slate-500">fee 0.10%</span></div>
+            {paperExecution?.last_error && <div className="mt-2 text-[10px] text-rose-200">{paperExecution.last_error}</div>}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <StatTile label="EQUITY" value={paper ? fmt(paper.equity, 0) : '—'} />

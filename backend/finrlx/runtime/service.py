@@ -7,6 +7,7 @@ from typing import Any
 
 from ..market.feed import feed
 from ..models.champion import champion
+from ..execution import FinRLAlpacaPaperExecutor
 from ..rl.trainer import TorchRLTrainer
 from ..rl.inference import LiveInferenceRunner
 from .paper import PaperAccount
@@ -15,6 +16,8 @@ class TradingRuntime:
     def __init__(self) -> None:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.paper = PaperAccount()
+        self.paper_execution = FinRLAlpacaPaperExecutor()
+        self.paper_enabled = False
         self.trainer = TorchRLTrainer(feed.training_events, self._publish_from_worker)
         self.inference = LiveInferenceRunner(feed.inference_events, self.trainer.act,
                                              self._publish_from_worker)
@@ -29,11 +32,15 @@ class TradingRuntime:
 
     def state(self) -> dict:
         model_info = champion.inspect()
+        paper = self.paper.snapshot()
+        paper["enabled"] = self.paper_enabled
+        paper["execution_mode"] = self.paper_execution.status()["mode"]
         return {"mode": "research_paper", "live_orders_enabled": False,
                 "live_gate": {"status": "closed", "reason": "broker execution adapter and user risk approval are not configured"},
                 "feed": feed.status(), "champion": model_info, "training": self.trainer.info(),
                 "inference": {"running": self.inference.running, "error": self.inference.error},
-                "paper": self.paper.snapshot(), "target_weights": self.latest_target,
+                "paper": paper, "paper_execution": self.paper_execution.status(),
+                "target_weights": self.latest_target,
                 "last_decision": self.last_decision, "error": self.last_error}
 
     async def start_feed(self, symbols: list[str], provider: str, timeframe: str) -> dict:
@@ -44,12 +51,14 @@ class TradingRuntime:
             if training["running"]:
                 raise ValueError("기존 PPO collector를 정리하는 중입니다. 잠시 뒤 시세를 다시 시작하세요.")
         self.paper.enabled = False
+        self.paper_enabled = False
         return await feed.start(symbols, provider, timeframe)
 
     async def stop_feed(self) -> dict:
         self.inference.stop()
         self.trainer.stop()
         self.paper.enabled = False
+        self.paper_enabled = False
         return await feed.stop()
 
     def start_training(self, *, algorithm: str = "PPO", frames_per_batch: int = 32,
@@ -71,25 +80,48 @@ class TradingRuntime:
             raise ValueError("시세를 먼저 시작하세요.")
         if not self.trainer.policy_ready or self.trainer.updates < 1:
             raise ValueError("TorchRL learner의 첫 업데이트가 끝난 뒤 paper 실행을 켜세요.")
+        execution_status = self.paper_execution.status()
+        if not execution_status["available"]:
+            raise ValueError(execution_status["last_error"] or "FinRL paper executor를 사용할 수 없습니다.")
         while True:
             try:
                 feed.inference_events.get_nowait()
             except queue.Empty:
                 break
-        self.paper.enabled = True
+        self.paper_enabled = True
+        self.paper.enabled = execution_status["mode"] == "local_paper"
         self.inference.start(feed.symbols)
         return self.paper.snapshot()
 
     def stop_paper(self) -> dict:
         self.inference.stop()
         self.paper.enabled = False
+        self.paper_enabled = False
         self.paper._save()
         return self.paper.snapshot()
 
     def _publish_from_worker(self, event: dict) -> None:
         data = event.get("data", {})
         if event.get("type") == "policy_decision":
-            weights = data.get("weights", {})
+            if self.strategy is None:
+                from ..strategy import TargetWeightStrategy
+                self.strategy = TargetWeightStrategy()
+            self.strategy.set_target_weights(data.get("weights", {}), {
+                "signal_time": data.get("signal_time"),
+                "execution_time": data.get("execution_time", data.get("timestamp")),
+                "source": "torchrl_policy",
+            })
+            strategy_result = self.strategy.generate_weights(
+                {}, target_date=str(data.get("execution_time", data.get("timestamp", "")))
+            )
+            weights = {
+                str(row.gvkey): float(row.weight)
+                for row in strategy_result.weights.itertuples(index=False)
+            }
+            data["finrl_strategy"] = {
+                "strategy_name": strategy_result.strategy_name,
+                "metadata": strategy_result.metadata,
+            }
             target = {"as_of": data.get("execution_time", data.get("timestamp")),
                       "signal_time": data.get("signal_time"),
                       "execution_time": data.get("execution_time", data.get("timestamp")),
@@ -101,22 +133,18 @@ class TradingRuntime:
                 self.latest_target = target
                 self.last_decision = data
             # Publish through FinRL-Trading's BaseStrategy contract.
-            if self.paper.enabled:
-                for symbol, price in data.get("prices", {}).items():
-                    self.paper.mark(symbol, float(price))
+            if self.paper_enabled:
                 try:
-                    self.paper.rebalance(weights, str(target["execution_time"]))
+                    if self.paper_execution.mode == "local":
+                        for symbol, price in data.get("prices", {}).items():
+                            self.paper.mark(symbol, float(price))
+                        self.paper.rebalance_strategy_result(strategy_result, str(target["execution_time"]))
+                    else:
+                        execution_result = self.paper_execution.execute_strategy_result(strategy_result)
+                        data["finrl_execution"] = execution_result
                 except Exception as exc:
                     self.paper.error = f"paper rebalance rejected: {exc}"
-            try:
-                if self.strategy is None:
-                    from ..strategy import TargetWeightStrategy
-                    self.strategy = TargetWeightStrategy()
-                self.strategy.set_target_weights(weights, {"signal_time": data.get("signal_time"),
-                                                           "execution_time": target["execution_time"],
-                                                           "source": "torchrl_policy"})
-            except Exception as exc:
-                self.last_error = f"FinRL-X weight contract 준비 실패: {type(exc).__name__}: {exc}"
+                    self.paper_execution.last_error = self.paper.error
         if self.loop and self.loop.is_running():
             self.loop.call_soon_threadsafe(self._enqueue_event, event)
 

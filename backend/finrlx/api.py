@@ -32,7 +32,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://127.0.0.1:5178", "http
 @app.get(f"{API_PREFIX}/health")
 def health() -> dict:
     return {"ok": True, "service": "finrlx-backend", "api_version": "v1",
-            "project_id": "finrlx-trading-lab", "runtime_contract": 2}
+            "project_id": "finrlx-trading-lab", "runtime_contract": 5}
 
 @app.get(f"{API_PREFIX}/state")
 def state() -> dict:
