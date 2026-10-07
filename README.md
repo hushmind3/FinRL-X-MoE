@@ -19,6 +19,8 @@ TorchRL actor는 FinRL-X `BaseStrategy`의 target-weight 생성부에 들어가 
 
 PPO는 learner baseline입니다. learner registry는 정책과 `EnvBase`에서 분리되어 있습니다. 과거 rollout, PPO 수집, 결정론적 실시간 paper 추론은 같은 actor 구조와 관측 계약을 사용합니다. 실시간 paper는 학습 Collector와 별도 시세 queue를 읽고 같은 actor의 deterministic helper로 행동합니다. 체크포인트 호환성은 architecture version, feature schema, Expert latent schema를 확인하며 ticker 목록을 저장하지 않습니다.
 
+`runtime/policy_torchrl.pt`는 새 정책의 actor·critic 가중치와 PPO optimizer 상태를 저장해 백테스트/추론에 재사용하고 학습을 이어가는 용도입니다. 업데이트가 한 번도 완료되지 않으면 저장하지 않습니다. 이 파일에는 Expert 가중치나 시세 데이터는 복제하지 않습니다.
+
 FinRL-Trading 2.0.2의 공개 `BacktestEngine.run_backtest()`는 종목 비중 합계를 1로 정규화해 현금 비중을 없앱니다. 그래서 백테스트 adapter가 이 공개 메서드의 정규화 단계는 건너뛰고, 설치된 엔진의 가격 준비·수수료·지표 계산과 `bt`의 `WeighTarget`을 재사용합니다. 이 adapter는 해당 버전에 고정돼 private engine helper를 호출합니다. `bt`에는 실제 종목만 전달합니다. 비중 합계가 1보다 작으면 차액은 `bt`의 현금으로 남고, 모든 종목 비중이 0이면 현금 100%입니다.
 
 신호 시각과 실행 시각은 나눕니다. 정책은 `bar_close[t]`에서 상태를 읽고, 다음 이용 가능한 종가 `t+1`에서 목표를 실행합니다. live environment와 backtest 모두 실행 시점에 목표를 적용하고 같은 거래비용 0.1%를 씁니다. paper ledger에도 현금 잔액을 별도 보유하며 매도·매수 주문만 기록합니다.

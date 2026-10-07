@@ -109,11 +109,11 @@ class TorchRLTrainer:
                 SharedPortfolioValue().to(self.device),
                 in_keys=["asset_features", "expert_latent", "expert_mask", "asset_mask", "account_state"],
             ).to(self.device)
-            self._load_checkpoint(policy, critic)
             learner = create_learner(
                 self.algorithm, actor=policy, critic=critic, learning_rate=self.learning_rate,
                 minibatch_size=max(1, min(64, self.frames_per_batch)),
             )
+            self._load_checkpoint(policy, critic, learner)
             with self._policy_lock:
                 self._policy, self._critic = policy, critic
             policy.eval()
@@ -135,9 +135,8 @@ class TorchRLTrainer:
                 self.steps += int(rollout.numel())
                 self.updates += 1
                 if self.updates % 10 == 0:
-                    self._save(policy, critic)
+                    self._save(policy, critic, learner)
                 self.publish({"type": "training_status", "data": self.info()})
-            self._save(policy, critic)
             self.status = "stopped"
         except Exception as exc:
             if self._stop.is_set():
@@ -147,9 +146,9 @@ class TorchRLTrainer:
                 self.status = "error"
         finally:
             self.running = False
-            if self._policy is not None and self._critic is not None:
+            if self.updates > 0 and self._policy is not None and self._critic is not None:
                 try:
-                    self._save(self._policy, self._critic)
+                    self._save(self._policy, self._critic, learner if "learner" in locals() else None)
                 except Exception as exc:
                     self.error = self.error or f"정책 저장 실패: {type(exc).__name__}: {exc}"
             if collector is not None:
@@ -159,7 +158,7 @@ class TorchRLTrainer:
                     pass
             self.publish({"type": "training_status", "data": self.info()})
 
-    def _load_checkpoint(self, policy: ProbabilisticActor, critic: ValueOperator) -> None:
+    def _load_checkpoint(self, policy: ProbabilisticActor, critic: ValueOperator, learner=None) -> None:
         if not self.checkpoint.is_file():
             return
         try:
@@ -174,16 +173,27 @@ class TorchRLTrainer:
             critic.module.load_state_dict(state["critic"], strict=True)
             self.updates = int(state.get("updates", 0))
             self.steps = int(state.get("steps", 0))
+            optimizer = getattr(learner, "optimizer", None)
+            saved_optimizer = state.get("optimizer")
+            if (optimizer is not None and saved_optimizer is not None
+                    and state.get("algorithm", "").upper() == self.algorithm):
+                optimizer.load_state_dict(saved_optimizer)
         except (OSError, RuntimeError, ValueError, TypeError):
             # An incompatible or damaged checkpoint is not partially loaded.
             return
 
-    def _save(self, policy, critic) -> None:
+    def _save(self, policy, critic, learner=None) -> None:
+        # Never publish a randomly initialized policy when collection or the
+        # first learner update fails before producing a trained checkpoint.
+        if self.updates < 1:
+            return
         self.checkpoint.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.checkpoint.with_suffix(".tmp")
+        optimizer = getattr(learner, "optimizer", None)
         torch.save({"algorithm": self.algorithm, "architecture_version": ARCHITECTURE_VERSION,
                     "policy_contract": PolicyContract().as_dict(),
                     "policy": policy.module.state_dict(), "critic": critic.module.state_dict(),
+                    "optimizer": optimizer.state_dict() if optimizer is not None else None,
                     "updates": self.updates, "steps": self.steps}, tmp)
         os.replace(tmp, self.checkpoint)
 
